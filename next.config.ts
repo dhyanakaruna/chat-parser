@@ -4,10 +4,8 @@ const nextConfig: NextConfig = {
   // Optimize for production
   output: 'standalone',
   
-  // Enable experimental features for better performance
-  experimental: {
-    serverComponentsExternalPackages: ['mongodb'],
-  },
+  // External packages for server components
+  serverExternalPackages: ['mongodb'],
   
   // Configure images if needed
   images: {

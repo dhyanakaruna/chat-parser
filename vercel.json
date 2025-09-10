@@ -1,11 +1,4 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
   "functions": {
     "src/app/api/upload/route.ts": {
       "maxDuration": 30
@@ -13,9 +6,6 @@
     "src/app/api/messages/route.ts": {
       "maxDuration": 10
     }
-  },
-  "env": {
-    "NODE_ENV": "production"
   },
   "headers": [
     {
@@ -34,12 +24,6 @@
           "value": "Content-Type, Authorization"
         }
       ]
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/"
     }
   ]
 }
