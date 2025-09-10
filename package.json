@@ -11,7 +11,6 @@
     "type-check": "tsc --noEmit",
     "build:vercel": "next build",
     "prebuild": "node scripts/build-check.mjs",
-    "postbuild": "next-sitemap",
     "deploy": "vercel --prod",
     "deploy:check": "npm run type-check && npm run lint && npm run build",
     "test": "node test-app.mjs"
