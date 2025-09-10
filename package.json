@@ -10,10 +10,11 @@
     "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
     "type-check": "tsc --noEmit",
     "build:vercel": "next build",
-    "prebuild": "node scripts/build-check.js",
+    "prebuild": "node scripts/build-check.mjs",
     "postbuild": "next-sitemap",
     "deploy": "vercel --prod",
-    "deploy:check": "npm run type-check && npm run lint && npm run build"
+    "deploy:check": "npm run type-check && npm run lint && npm run build",
+    "test": "node test-app.mjs"
   },
   "dependencies": {
     "mongodb": "^6.19.0",

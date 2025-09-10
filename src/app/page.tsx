@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import FileUpload from '@/components/FileUpload';
 import ChatMessages from '@/components/ChatMessages';
 import { ChatMessage } from '@/lib/db';

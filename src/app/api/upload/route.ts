@@ -156,7 +156,7 @@ ${fileContent}`;
     let parsedMessages;
     try {
       parsedMessages = JSON.parse(responseText);
-    } catch (parseError) {
+    } catch {
       console.error('Failed to parse OpenAI response:', responseText);
       throw new Error('Invalid JSON response from OpenAI');
     }

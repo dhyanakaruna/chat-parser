@@ -5,9 +5,13 @@
  * Ensures all necessary checks pass before deployment
  */
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 console.log('🔍 Running pre-deployment checks...\n');
 
@@ -42,7 +46,7 @@ try {
   console.log('🔍 Running TypeScript type check...');
   execSync('npx tsc --noEmit', { stdio: 'inherit' });
   console.log('✅ TypeScript type check passed');
-} catch (error) {
+} catch {
   console.error('❌ TypeScript type check failed');
   process.exit(1);
 }
@@ -52,7 +56,7 @@ try {
   console.log('🔍 Running ESLint...');
   execSync('npx eslint . --ext .ts,.tsx,.js,.jsx --max-warnings 0', { stdio: 'inherit' });
   console.log('✅ ESLint check passed');
-} catch (error) {
+} catch {
   console.error('❌ ESLint check failed');
   process.exit(1);
 }
