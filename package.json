@@ -6,7 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
+    "type-check": "tsc --noEmit",
+    "build:vercel": "next build",
+    "prebuild": "node scripts/build-check.js",
+    "postbuild": "next-sitemap",
+    "deploy": "vercel --prod",
+    "deploy:check": "npm run type-check && npm run lint && npm run build"
   },
   "dependencies": {
     "mongodb": "^6.19.0",

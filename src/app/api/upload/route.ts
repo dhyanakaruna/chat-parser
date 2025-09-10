@@ -16,6 +16,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check MongoDB connection
+    if (!process.env.MONGODB_URI) {
+      return NextResponse.json(
+        { error: 'Database connection not configured' },
+        { status: 500 }
+      );
+    }
+
     // Parse the form data
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -23,6 +31,15 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return NextResponse.json(
         { error: 'No file uploaded' },
+        { status: 400 }
+      );
+    }
+
+    // Check file size (Vercel limit: 4.5MB)
+    const maxSize = 4 * 1024 * 1024; // 4MB to be safe
+    if (file.size > maxSize) {
+      return NextResponse.json(
+        { error: 'File size too large. Maximum size is 4MB.' },
         { status: 400 }
       );
     }
@@ -41,6 +58,14 @@ export async function POST(request: NextRequest) {
     if (!fileContent.trim()) {
       return NextResponse.json(
         { error: 'File is empty' },
+        { status: 400 }
+      );
+    }
+
+    // Check content length to prevent excessive processing
+    if (fileContent.length > 100000) { // 100KB limit
+      return NextResponse.json(
+        { error: 'File content too large. Please use a smaller file.' },
         { status: 400 }
       );
     }
@@ -69,26 +94,62 @@ Rules:
 Chat log content:
 ${fileContent}`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: "You are a helpful assistant that parses chat logs and returns structured JSON data. Always return valid JSON only."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 4000,
-    });
+    // Create AbortController for timeout handling
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
 
-    const responseText = completion.choices[0]?.message?.content;
+    let responseText;
+    const models = ["gpt-3.5-turbo", "gpt-4o-mini", "gpt-4"]; // Fallback models
+    let lastError;
+    
+    for (const model of models) {
+      try {
+        const completion = await openai.chat.completions.create({
+          model: model,
+          messages: [
+            {
+              role: "system",
+              content: "You are a helpful assistant that parses chat logs and returns structured JSON data. Always return valid JSON only."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 3000, // Reduced for faster response
+        }, {
+          signal: controller.signal,
+          timeout: 20000, // 20 second timeout
+        });
+
+        responseText = completion.choices[0]?.message?.content;
+        
+        if (responseText) {
+          console.log(`Successfully used model: ${model}`);
+          break; // Success, exit the loop
+        }
+      } catch (error) {
+        lastError = error;
+        console.warn(`Model ${model} failed:`, error instanceof Error ? error.message : 'Unknown error');
+        
+        // If it's an access error, try the next model
+        if (error instanceof Error && error.message.includes('does not exist or you do not have access')) {
+          continue;
+        }
+        
+        // For other errors, break and throw
+        break;
+      }
+    }
+    
+    clearTimeout(timeoutId);
     
     if (!responseText) {
-      throw new Error('No response from OpenAI');
+      if (lastError instanceof Error && lastError.name === 'AbortError') {
+        throw new Error('Request timeout - file processing took too long');
+      }
+      throw new Error(`All models failed. Last error: ${lastError instanceof Error ? lastError.message : 'Unknown error'}`);
     }
 
     // Parse the JSON response
