@@ -2,6 +2,53 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createChatMessagesCollection, insertChatMessages } from '@/lib/db';
 
+// Manual chat parsing function for fallback
+function parseChatManually(content: string) {
+  const messages = [];
+  const lines = content.split('\n');
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+    
+    // Try different chat formats
+    // Format 1: [timestamp] sender: message
+    let match = trimmedLine.match(/^\[([^\]]+)\]\s*([^:]+):\s*(.+)$/);
+    if (match) {
+      messages.push({
+        sender: match[2].trim(),
+        timestamp: match[1].trim(),
+        message: match[3].trim()
+      });
+      continue;
+    }
+    
+    // Format 2: timestamp sender: message
+    match = trimmedLine.match(/^([^\s]+)\s+([^:]+):\s*(.+)$/);
+    if (match) {
+      messages.push({
+        sender: match[2].trim(),
+        timestamp: match[1].trim(),
+        message: match[3].trim()
+      });
+      continue;
+    }
+    
+    // Format 3: sender: message (no timestamp)
+    match = trimmedLine.match(/^([^:]+):\s*(.+)$/);
+    if (match) {
+      messages.push({
+        sender: match[1].trim(),
+        timestamp: 'Unknown',
+        message: match[2].trim()
+      });
+      continue;
+    }
+  }
+  
+  return messages;
+}
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -63,9 +110,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Check content length to prevent excessive processing
-    if (fileContent.length > 100000) { // 100KB limit
+    if (fileContent.length > 50000) { // 50KB limit to prevent timeouts
       return NextResponse.json(
-        { error: 'File content too large. Please use a smaller file.' },
+        { error: 'File content too large. Please use a smaller file (max 50KB).' },
         { status: 400 }
       );
     }
@@ -114,16 +161,21 @@ Example of expected output format:
 Chat log content to parse:
 ${fileContent}`;
 
-    // Create AbortController for timeout handling
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
-
     let responseText;
     const models = ["gpt-3.5-turbo", "gpt-4o-mini", "gpt-4"]; // Fallback models
     let lastError;
     
     for (const model of models) {
+      // Create a new AbortController for each model attempt
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.log(`Timeout for model ${model}, aborting request`);
+        controller.abort();
+      }, 30000); // 30 second timeout per model
+      
       try {
+        console.log(`Attempting to use model: ${model}`);
+        
         const completion = await openai.chat.completions.create({
           model: model,
           messages: [
@@ -137,12 +189,13 @@ ${fileContent}`;
             }
           ],
           temperature: 0.1,
-          max_tokens: 3000, // Reduced for faster response
+          max_tokens: 2000, // Further reduced for faster response
         }, {
           signal: controller.signal,
-          timeout: 20000, // 20 second timeout
+          timeout: 25000, // 25 second timeout
         });
 
+        clearTimeout(timeoutId);
         responseText = completion.choices[0]?.message?.content;
         
         if (responseText) {
@@ -150,24 +203,61 @@ ${fileContent}`;
           break; // Success, exit the loop
         }
       } catch (error) {
+        clearTimeout(timeoutId);
         lastError = error;
-        console.warn(`Model ${model} failed:`, error instanceof Error ? error.message : 'Unknown error');
+        
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.warn(`Model ${model} failed:`, errorMessage);
+        
+        // Check if it's a timeout/abort error
+        if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('aborted'))) {
+          console.log(`Model ${model} timed out, trying next model...`);
+          continue; // Try next model
+        }
         
         // If it's an access error, try the next model
         if (error instanceof Error && error.message.includes('does not exist or you do not have access')) {
+          console.log(`Model ${model} not accessible, trying next model...`);
           continue;
         }
         
-        // For other errors, break and throw
-        break;
+        // If it's a rate limit error, wait a bit and try next model
+        if (error instanceof Error && error.message.includes('rate limit')) {
+          console.log(`Rate limit hit for model ${model}, trying next model...`);
+          continue;
+        }
+        
+        // For other errors, try next model
+        console.log(`Other error with model ${model}, trying next model...`);
+        continue;
       }
     }
     
-    clearTimeout(timeoutId);
-    
     if (!responseText) {
+      console.log('All AI models failed, attempting fallback parsing...');
+      
+      // Fallback: Try to parse the chat manually for simple formats
+      try {
+        const fallbackMessages = parseChatManually(fileContent);
+        if (fallbackMessages.length > 0) {
+          console.log(`Fallback parsing successful, found ${fallbackMessages.length} messages`);
+          
+          // Insert messages into database
+          const insertedMessages = await insertChatMessages(fallbackMessages);
+          
+          return NextResponse.json({
+            success: true,
+            message: `Successfully processed ${insertedMessages.length} messages using fallback parsing`,
+            data: insertedMessages,
+            fallback: true
+          });
+        }
+      } catch (fallbackError) {
+        console.error('Fallback parsing also failed:', fallbackError);
+      }
+      
       if (lastError instanceof Error && lastError.name === 'AbortError') {
-        throw new Error('Request timeout - file processing took too long');
+        throw new Error('Request timeout - file processing took too long. Please try with a smaller file.');
       }
       throw new Error(`All models failed. Last error: ${lastError instanceof Error ? lastError.message : 'Unknown error'}`);
     }
