@@ -1,0 +1,7 @@
+[2024-01-15 09:00:00] John: Good morning team!
+
+[2024-01-15 09:00:15] Sarah: Morning John! Ready for the demo?
+
+[2024-01-15 09:01:30] John: Absolutely! Everything is set up and ready to go.
+
+[2024-01-15 09:02:00] Sarah: Perfect! See you in the conference room at 10 AM.
