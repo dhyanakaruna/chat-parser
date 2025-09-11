@@ -76,22 +76,42 @@ export async function POST(request: NextRequest) {
     // Process the file content with OpenAI
     const prompt = `You are a chat log parser. Parse the following chat log text and extract structured data. 
 
-Return ONLY a valid JSON array where each object has the following structure:
+CRITICAL INSTRUCTIONS:
+- You MUST return ONLY a valid JSON array
+- NO explanations, NO markdown, NO code blocks, NO additional text
+- Start your response with [ and end with ]
+- Each object must have exactly these three fields: sender, timestamp, message
+
+Required JSON structure for each message:
 {
   "sender": "string (name of the person who sent the message)",
-  "timestamp": "string (timestamp or time of the message)",
+  "timestamp": "string (timestamp or time of the message)", 
   "message": "string (the actual message content)"
 }
 
-Rules:
+Parsing rules:
 1. Extract ALL messages from the chat log
 2. If timestamp is not available, use "Unknown" as the value
 3. If sender is not available, use "Unknown" as the value
 4. Clean up the message content (remove extra whitespace, but preserve line breaks within messages)
-5. Return ONLY the JSON array, no other text or explanation
-6. Ensure the JSON is valid and properly formatted
+5. Ensure all JSON is properly escaped and valid
+6. Return ONLY the JSON array - nothing else
 
-Chat log content:
+Example of expected output format:
+[
+  {
+    "sender": "Alice",
+    "timestamp": "2024-01-15 10:30:15",
+    "message": "Hey everyone! How's the project going?"
+  },
+  {
+    "sender": "Bob", 
+    "timestamp": "2024-01-15 10:31:22",
+    "message": "Good morning! I've been working on the database schema."
+  }
+]
+
+Chat log content to parse:
 ${fileContent}`;
 
     // Create AbortController for timeout handling
@@ -155,10 +175,90 @@ ${fileContent}`;
     // Parse the JSON response
     let parsedMessages;
     try {
-      parsedMessages = JSON.parse(responseText);
-    } catch {
-      console.error('Failed to parse OpenAI response:', responseText);
-      throw new Error('Invalid JSON response from OpenAI');
+      // Log the raw response for debugging
+      console.log('Raw OpenAI response:', responseText);
+      console.log('Response length:', responseText.length);
+      console.log('Response type:', typeof responseText);
+      
+      // Clean up the response if it contains markdown formatting
+      let cleanedResponse = responseText.trim();
+      
+      // Remove markdown code blocks if present
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanedResponse.startsWith('```')) {
+        cleanedResponse = cleanedResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      // Remove any leading/trailing whitespace
+      cleanedResponse = cleanedResponse.trim();
+      
+      // Try to extract JSON from the response if it's embedded in text
+      const jsonMatch = cleanedResponse.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        cleanedResponse = jsonMatch[0];
+      }
+      
+      // Additional cleanup for common issues
+      cleanedResponse = cleanedResponse
+        .replace(/^[^{[]*/, '') // Remove any text before the JSON
+        .replace(/[^}\]]*$/, '') // Remove any text after the JSON
+        .trim();
+      
+      console.log('Cleaned response:', cleanedResponse);
+      
+      parsedMessages = JSON.parse(cleanedResponse);
+    } catch (parseError) {
+      console.error('Failed to parse OpenAI response:');
+      console.error('Raw response:', responseText);
+      console.error('Parse error:', parseError);
+      
+      // Try to provide a more helpful error message
+      let errorMessage = 'Invalid JSON response from OpenAI.';
+      if (responseText.includes('```')) {
+        errorMessage += ' The response appears to contain markdown formatting that could not be parsed.';
+      } else if (!responseText.includes('[') || !responseText.includes(']')) {
+        errorMessage += ' The response does not appear to contain a JSON array.';
+      } else {
+        errorMessage += ' The JSON structure is malformed.';
+      }
+      
+      errorMessage += ` Raw response preview: ${responseText.substring(0, 300)}...`;
+      
+      // Try one more fallback: attempt to manually construct JSON from the response
+      try {
+        console.log('Attempting fallback JSON construction...');
+        const fallbackMessages = [];
+        const lines = responseText.split('\n');
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (trimmedLine && (trimmedLine.includes('sender') || trimmedLine.includes('timestamp') || trimmedLine.includes('message'))) {
+            // Try to extract key-value pairs from the line
+            const senderMatch = trimmedLine.match(/"sender":\s*"([^"]*)"/);
+            const timestampMatch = trimmedLine.match(/"timestamp":\s*"([^"]*)"/);
+            const messageMatch = trimmedLine.match(/"message":\s*"([^"]*)"/);
+            
+            if (senderMatch || timestampMatch || messageMatch) {
+              fallbackMessages.push({
+                sender: senderMatch ? senderMatch[1] : 'Unknown',
+                timestamp: timestampMatch ? timestampMatch[1] : 'Unknown',
+                message: messageMatch ? messageMatch[1] : ''
+              });
+            }
+          }
+        }
+        
+        if (fallbackMessages.length > 0) {
+          console.log('Fallback parsing successful, found', fallbackMessages.length, 'messages');
+          parsedMessages = fallbackMessages;
+        } else {
+          throw new Error(errorMessage);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback parsing also failed:', fallbackError);
+        throw new Error(errorMessage);
+      }
     }
 
     // Validate the parsed data
